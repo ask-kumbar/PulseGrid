@@ -1,62 +1,95 @@
 # PulseGrid
 
-**A distributed, real-time IoT telemetry ingestion pipeline built with Kafka, Redis, TimescaleDB, FastAPI, and Protobuf.**
+A distributed, real-time IoT telemetry pipeline built with FastAPI, Protobuf, Kafka, Redis, and TimescaleDB.
 
-PulseGrid accepts binary telemetry events from devices, publishes them to Kafka, keeps the newest state in Redis, and persists each metric in TimescaleDB for historical analysis.
+## What it does
+
+PulseGrid receives telemetry from simulated IoT devices, processes it asynchronously, and stores it in two forms:
+
+- **Redis** holds the latest state for fast device lookups.
+- **TimescaleDB** retains every metric for historical queries and charts.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-  D[Device simulator] --> A[FastAPI ingestion API]
-  A --> K[(Kafka: telemetry.raw)]
+  D[Device simulator] -->|Protobuf over HTTP| A[Ingestion API]
+  A -->|device_id key| K[(Kafka: telemetry.raw)]
   K --> P[Telemetry processor]
   P --> R[(Redis: latest state)]
   P --> T[(TimescaleDB: history)]
 ```
 
-## Current MVP stage
+## Implemented
 
-The core local pipeline is working end to end:
+- Protobuf telemetry contract and binary HTTP ingestion endpoint
+- Kafka topic with three partitions, keyed by `device_id`
+- Async Kafka producer and consumer processor
+- Redis latest-state storage per tenant and device
+- TimescaleDB telemetry history with idempotent inserts
+- Device simulator and end-to-end local verification
 
-```text
-Simulator → FastAPI → Kafka → Processor → Redis + TimescaleDB
+## Run locally
+
+Requirements: Docker Desktop and Python 3.12+.
+
+```bash
+git clone https://github.com/ask-kumbar/PulseGrid.git
+cd PulseGrid
+
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade -e ".[dev]"
+
+docker compose up -d kafka redis timescaledb
 ```
 
-The next milestone is a query API that reads latest state from Redis and time-range history from TimescaleDB.
+Create the Kafka topic once:
 
-## Technology choices
+```bash
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --create --if-not-exists \
+  --topic telemetry.raw \
+  --partitions 3 \
+  --replication-factor 1
+```
 
-| Component | Role |
-|---|---|
-| Kafka | Durable, partitioned event stream; replay and consumer scaling |
-| Redis | Fast latest-device-state lookups |
-| TimescaleDB | Persistent time-series telemetry history |
-| FastAPI | Protobuf-over-HTTP ingestion API |
-| Python | Simulator and Kafka processor services |
-| Protobuf | Compact, typed telemetry event format |
+Start these in separate terminals:
 
-## Event contract
+```bash
+uvicorn services.ingestion_api.main:app --reload
+```
 
-Telemetry uses the `TelemetryEvent` Protobuf message defined in [proto/telemetry.proto](proto/telemetry.proto). It contains an event UUID, tenant ID, device ID, observation time, sequence number, and one or more metrics.
+```bash
+python -m services.telemetry_processor.main
+```
 
-Kafka uses `device_id` as the message key. That keeps one device's events in order while allowing different devices to be distributed across partitions.
+```bash
+python -m services.device_simulator.main
+```
 
-## Reliability principles
+## Verify stored telemetry
 
-- Kafka is the durable event stream; Redis is rebuildable latest state.
-- Processing is at-least-once: the processor commits the Kafka offset only after both database and Redis writes succeed.
-- TimescaleDB inserts are idempotent through the metric history primary key.
-- Timestamps are stored in UTC.
+Latest device state in Redis:
 
-## Local development
+```bash
+docker compose exec redis redis-cli --raw GET telemetry:latest:acme:sensor-204 | jq
+```
 
-Install Docker Desktop and Python 3.12+, then follow the copyable commands in [docs/command-guide.md](docs/command-guide.md).
+Historical telemetry in TimescaleDB:
 
-## Planned next steps
+```bash
+docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "SELECT event_id, device_id, metric, value, observed_at FROM telemetry_events ORDER BY observed_at DESC;"
+```
 
-- Query API for latest state and telemetry history
-- React dashboard
-- Dead-letter queue, tests, and observability
-- Cloud deployment
+## Documentation
+
+For setup details and every command used during development, see [the command guide](docs/command-guide.md).
+
+## Next
+
+Build the query API for latest state and historical telemetry, then add a dashboard.
 
 ## License
 
