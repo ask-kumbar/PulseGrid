@@ -1,6 +1,7 @@
 services:
   kafka:
     image: apache/kafka:3.9.0
+    hostname: kafka
     ports:
       - "9092:9092"
     environment:
@@ -20,18 +21,22 @@ services:
     image: redis:7.4-alpine
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
 
   timescaledb:
     image: timescale/timescaledb:2.17.2-pg16
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: pulsegrid
-      POSTGRES_USER: pulsegrid
-      POSTGRES_PASSWORD: change-me-for-local-only
+      POSTGRES_DB: ${POSTGRES_DB:-pulsegrid}
+      POSTGRES_USER: ${POSTGRES_USER:-pulsegrid}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-for-local-only}
     volumes:
-      - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - timescale-data:/var/lib/postgresql/data
+      - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
 
 volumes:
+  redis-data:
   timescale-data:
