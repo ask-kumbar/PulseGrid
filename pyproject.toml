@@ -9,10 +9,14 @@ dependencies = [
   "fastapi>=0.115,<1.0",
   "httpx>=0.28,<1.0",
   "pydantic>=2.10,<3.0",
+  "protobuf>=7.35.1,<8.0",
   "python-dotenv>=1.0,<2.0",
   "redis>=5.2,<6.0",
   "uvicorn[standard]>=0.34,<1.0",
 ]
 
+[project.optional-dependencies]
+dev = ["grpcio-tools>=1.70,<2.0"]
+
 [tool.setuptools]
-packages = ["services", "services.ingestion_api", "services.telemetry_processor", "services.device_simulator"]
+packages = ["generated", "services", "services.ingestion_api", "services.telemetry_processor", "services.device_simulator"]

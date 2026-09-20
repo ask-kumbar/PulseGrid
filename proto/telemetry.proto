@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package pulsegrid.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// One named reading captured by an IoT device.
+message Metric {
+  string name = 1;   // Example: "temperature_c"
+  double value = 2;  // Example: 27.4
+  string unit = 3;   // Example: "celsius"
+}
+
+// The event sent by a device and carried unchanged through Kafka.
+message TelemetryEvent {
+  string event_id = 1;                         // Unique UUID for this event.
+  string device_id = 2;                        // Kafka message key.
+  string tenant_id = 3;                        // Device owner / customer.
+  google.protobuf.Timestamp observed_at = 4;  // When the device measured it.
+  uint64 sequence_no = 5;                      // Increasing number from this device.
+  repeated Metric metrics = 6;                 // One or more sensor readings.
+}
+
+// Returned by the HTTP API after Kafka accepts the event.
+message IngestTelemetryResponse {
+  string event_id = 1;
+  bool accepted = 2;
+}

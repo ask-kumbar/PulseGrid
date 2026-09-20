@@ -1,27 +1,61 @@
 import asyncio
-from datetime import UTC, datetime
-from random import uniform
+import os
 from uuid import uuid4
 
 import httpx
 from dotenv import load_dotenv
+from google.protobuf.timestamp_pb2 import Timestamp
+
+from generated.telemetry_pb2 import IngestTelemetryResponse, TelemetryEvent
 
 load_dotenv()
 
+API_URL = os.getenv("INGESTION_API_URL", "http://127.0.0.1:8000/v1/telemetry")
+PROTOBUF_MEDIA_TYPE = "application/x-protobuf"
+
+
+def build_event() -> TelemetryEvent:
+    observed_at = Timestamp()
+    observed_at.GetCurrentTime()
+
+    event = TelemetryEvent(
+        event_id=str(uuid4()),
+        device_id="sensor-204",
+        tenant_id="acme",
+        observed_at=observed_at,
+        sequence_no=1,
+    )
+    temperature = event.metrics.add()
+    temperature.name = "temperature_c"
+    temperature.value = 27.4
+    temperature.unit = "celsius"
+    return event
+
 
 async def main() -> None:
-    sequence_no = 0
+    event = build_event()
+    payload = event.SerializeToString()
+
     async with httpx.AsyncClient() as client:
-        while True:
-            sequence_no += 1
-            event = {
-                "eventId": str(uuid4()), "deviceId": "sensor-204", "tenantId": "acme",
-                "timestamp": datetime.now(UTC).isoformat(), "sequenceNo": sequence_no,
-                "metric": "temperature_c", "value": round(uniform(20, 30), 2),
-            }
-            response = await client.post("http://127.0.0.1:8000/v1/telemetry", json=event)
-            print(response.status_code, event)
-            await asyncio.sleep(1)
+        try:
+            response = await client.post(
+                API_URL,
+                content=payload,
+                headers={
+                    "Content-Type": PROTOBUF_MEDIA_TYPE,
+                    "Accept": PROTOBUF_MEDIA_TYPE,
+                },
+            )
+        except httpx.ConnectError as error:
+            raise SystemExit(f"Cannot reach the ingestion API at {API_URL}") from error
+
+    response.raise_for_status()
+    acknowledgment = IngestTelemetryResponse()
+    acknowledgment.ParseFromString(response.content)
+
+    print(f"HTTP status: {response.status_code}")
+    print(f"Event accepted: {acknowledgment.accepted}")
+    print(f"Event ID: {acknowledgment.event_id}")
 
 
 if __name__ == "__main__":
