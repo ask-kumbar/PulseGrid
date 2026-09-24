@@ -18,6 +18,9 @@ flowchart LR
   K --> P[Telemetry processor]
   P --> R[(Redis: latest state)]
   P --> T[(TimescaleDB: history)]
+  R --> Q[Query API]
+  T --> Q
+  Q --> C[Dashboard / API client]
 ```
 
 ## Implemented
@@ -27,6 +30,7 @@ flowchart LR
 - Async Kafka producer and consumer processor
 - Redis latest-state storage per tenant and device
 - TimescaleDB telemetry history with idempotent inserts
+- JSON query API for latest state and filtered history
 - Device simulator and end-to-end local verification
 
 ## Run locally
@@ -69,6 +73,10 @@ python -m services.telemetry_processor.main
 python -m services.device_simulator.main
 ```
 
+```bash
+uvicorn services.query_api.main:app --reload --port 8001
+```
+
 ## Verify stored telemetry
 
 Latest device state in Redis:
@@ -83,13 +91,25 @@ Historical telemetry in TimescaleDB:
 docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "SELECT event_id, device_id, metric, value, observed_at FROM telemetry_events ORDER BY observed_at DESC;"
 ```
 
+Latest state through the query API:
+
+```bash
+curl http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/latest
+```
+
+Historical state through the query API:
+
+```bash
+curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100"
+```
+
 ## Documentation
 
 For setup details and every command used during development, see [the command guide](docs/command-guide.md).
 
 ## Next
 
-Build the query API for latest state and historical telemetry, then add a dashboard.
+Add an operations dashboard, alert processing, tests, and observability.
 
 ## License
 

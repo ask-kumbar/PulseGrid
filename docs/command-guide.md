@@ -32,6 +32,12 @@ docker compose up -d timescaledb
 uvicorn services.ingestion_api.main:app --reload
 ```
 
+### Start the query API
+
+```bash
+uvicorn services.query_api.main:app --reload --port 8001
+```
+
 ### Start the processor
 
 ```bash
@@ -335,6 +341,14 @@ docker compose up -d timescaledb
 docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "\d telemetry_events"
 ```
 
+### Upgrade an existing local table
+
+Run this once if the TimescaleDB volume was created before metric units and the tenant-aware index were added:
+
+```bash
+docker compose exec -T timescaledb psql -U pulsegrid -d pulsegrid < infra/timescaledb/migrations/001_history_query.sql
+```
+
 ### Read recent telemetry history
 
 ```bash
@@ -345,16 +359,51 @@ Each event metric becomes one row. The table's primary key is `(event_id, metric
 
 ---
 
-## 9 · ✅ Current end-to-end test
+## 9 · 🔎 Query API
 
-Use three terminals. Start them in this order:
+The query API serves dashboard-friendly JSON. It reads current state from Redis and historical metrics from TimescaleDB.
+
+### Start the query API
+
+```bash
+source .venv/bin/activate
+uvicorn services.query_api.main:app --reload --port 8001
+```
+
+### Check query API health
+
+```bash
+curl http://127.0.0.1:8001/health
+```
+
+### Read latest device state
+
+```bash
+curl http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/latest | jq
+```
+
+### Read device history
+
+```bash
+curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100" | jq
+```
+
+Add `&metric=temperature_c` to filter the history to one metric. `hours` accepts `1` through `720`; `limit` accepts `1` through `1000`.
+
+---
+
+## 10 · ✅ Current end-to-end test
+
+Use four terminals. Start them in this order:
 
 ```text
 Terminal 1: Kafka + Redis + TimescaleDB + API
         ↓
 Terminal 2: Processor
         ↓
-Terminal 3: Simulator
+Terminal 3: Query API
+        ↓
+Terminal 4: Simulator and query checks
 ```
 
 ### Terminal 1: infrastructure and API
@@ -376,24 +425,33 @@ source .venv/bin/activate
 python -m services.telemetry_processor.main
 ```
 
-### Terminal 3: simulator
+### Terminal 3: query API
+
+```bash
+source .venv/bin/activate
+uvicorn services.query_api.main:app --reload --port 8001
+```
+
+### Terminal 4: simulator and queries
 
 ```bash
 source .venv/bin/activate
 python -m services.device_simulator.main
+curl http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/latest | jq
+curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100" | jq
 ```
 
 Expected flow:
 
 ```text
-Simulator → FastAPI → Kafka telemetry.raw → processor → Redis latest state + TimescaleDB history
+Simulator → FastAPI → Kafka → processor → Redis + TimescaleDB → query API
 ```
 
 The API returns `202 Accepted`, and the processor prints the decoded event with its Kafka partition and offset. Verify Redis with `GET` and TimescaleDB with the history query above.
 
 ---
 
-## 8 · 🧹 Clean local topic reset
+## 11 · 🧹 Clean local topic reset
 
 > [!CAUTION]
 > This permanently deletes every event in `telemetry.raw`. Stop the processor first with `Ctrl + C`.

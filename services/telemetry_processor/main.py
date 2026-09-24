@@ -77,8 +77,8 @@ async def main() -> None:
                     await database.execute(
                         """
                         INSERT INTO telemetry_events
-                          (event_id, device_id, tenant_id, observed_at, sequence_no, metric, value)
-                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                          (event_id, device_id, tenant_id, observed_at, sequence_no, metric, value, unit)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                         ON CONFLICT (event_id, metric, observed_at) DO NOTHING
                         """,
                         event.event_id,
@@ -88,6 +88,7 @@ async def main() -> None:
                         event.sequence_no,
                         metric.name,
                         metric.value,
+                        metric.unit,
                     )
 
             key = latest_state_key(event)

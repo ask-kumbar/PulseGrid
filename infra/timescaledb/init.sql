@@ -8,9 +8,11 @@ CREATE TABLE telemetry_events (
   sequence_no BIGINT NOT NULL,
   metric TEXT NOT NULL,
   value DOUBLE PRECISION NOT NULL,
+  unit TEXT NOT NULL,
   ingested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (event_id, metric, observed_at)
 );
 
 SELECT create_hypertable('telemetry_events', by_range('observed_at'), if_not_exists => TRUE);
-CREATE INDEX telemetry_events_device_time_idx ON telemetry_events (device_id, observed_at DESC);
+CREATE INDEX telemetry_events_tenant_device_time_idx
+  ON telemetry_events (tenant_id, device_id, observed_at DESC);
