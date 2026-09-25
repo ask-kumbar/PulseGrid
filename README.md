@@ -31,6 +31,7 @@ flowchart LR
 - Redis latest-state storage per tenant and device
 - TimescaleDB telemetry history with idempotent inserts
 - JSON query API for latest state and filtered history
+- Configurable concurrent simulator for finite load tests or continuous telemetry
 - Device simulator and end-to-end local verification
 
 ## Run locally
@@ -71,6 +72,18 @@ python -m services.telemetry_processor.main
 
 ```bash
 python -m services.device_simulator.main
+```
+
+Run a short multi-device load test:
+
+```bash
+python -m services.device_simulator.main --devices 3 --count 20 --interval 0.5
+```
+
+Run continuously until `Ctrl+C`:
+
+```bash
+python -m services.device_simulator.main --devices 3 --count 0 --interval 1
 ```
 
 ```bash

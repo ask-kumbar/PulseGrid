@@ -280,7 +280,23 @@ source .venv/bin/activate
 python -m services.device_simulator.main
 ```
 
-The simulator creates a `TelemetryEvent`, serializes it to Protobuf bytes, sends it to FastAPI, and deserializes the Protobuf acknowledgment. Expected output includes `HTTP status: 202` and `Event accepted: True`.
+The simulator creates a `TelemetryEvent`, serializes it to Protobuf bytes, sends it to FastAPI, and deserializes the Protobuf acknowledgment. Expected output includes `accepted=True`, the device ID, sequence number, and event ID.
+
+### Run a finite multi-device load test
+
+```bash
+python -m services.device_simulator.main --devices 3 --count 20 --interval 0.5
+```
+
+This runs three device tasks concurrently. Each device sends 20 ordered events, one every half second. Each event contains temperature and humidity metrics.
+
+### Run continuous telemetry
+
+```bash
+python -m services.device_simulator.main --devices 3 --count 0 --interval 1
+```
+
+`--count 0` continues until `Ctrl+C`. Use `--start-sequence` when continuing a simulated device from a known sequence number.
 
 ### Run one processor worker
 
