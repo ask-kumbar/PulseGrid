@@ -32,6 +32,7 @@ flowchart LR
 - TimescaleDB telemetry history with idempotent inserts
 - JSON query API for latest state and filtered history
 - Configurable concurrent simulator for finite load tests or continuous telemetry
+- Automated tests for event construction, ingestion validation, Kafka publishing, and query behavior
 - Device simulator and end-to-end local verification
 
 ## Run locally
@@ -116,13 +117,21 @@ Historical state through the query API:
 curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100"
 ```
 
+## Run automated tests
+
+```bash
+python -m pytest -q
+```
+
+These tests use in-memory fakes for Kafka, Redis, and TimescaleDB, so Docker does not need to be running.
+
 ## Documentation
 
 For setup details and every command used during development, see [the command guide](docs/command-guide.md).
 
 ## Next
 
-Add an operations dashboard, alert processing, tests, and observability.
+Add an operations dashboard, alert processing, and observability.
 
 ## License
 

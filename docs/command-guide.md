@@ -205,7 +205,7 @@ The `(.venv)` prefix in the terminal means the environment is active. Project li
 pip install --upgrade -e ".[dev]"
 ```
 
-`-e` means editable: Python uses the source files in this project folder directly. The `[dev]` extra also installs development tools such as `grpcio-tools`.
+`-e` means editable: Python uses the source files in this project folder directly. The `[dev]` extra also installs development tools such as `grpcio-tools`, `pytest`, and `pytest-asyncio`.
 
 ---
 
@@ -467,7 +467,25 @@ The API returns `202 Accepted`, and the processor prints the decoded event with 
 
 ---
 
-## 11 · 🧹 Clean local topic reset
+## 11 · 🧪 Automated tests
+
+Run the test suite from the project root:
+
+```bash
+python -m pytest -q
+```
+
+The tests verify event construction, Protobuf request validation, Kafka publishing, Redis latest-state responses, and TimescaleDB history-query behavior. They replace external services with in-memory fakes, so Docker does not need to be running.
+
+Expected result:
+
+```text
+9 passed
+```
+
+---
+
+## 12 · 🧹 Clean local topic reset
 
 > [!CAUTION]
 > This permanently deletes every event in `telemetry.raw`. Stop the processor first with `Ctrl + C`.
