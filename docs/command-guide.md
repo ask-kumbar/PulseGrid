@@ -365,6 +365,18 @@ Run this once if the TimescaleDB volume was created before metric units and the 
 docker compose exec -T timescaledb psql -U pulsegrid -d pulsegrid < infra/timescaledb/migrations/001_history_query.sql
 ```
 
+Create the alerts table in an existing local database:
+
+```bash
+docker compose exec -T timescaledb psql -U pulsegrid -d pulsegrid < infra/timescaledb/migrations/002_alerts.sql
+```
+
+Verify its columns, constraints, and indexes:
+
+```bash
+docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "\d alerts"
+```
+
 ### Read recent telemetry history
 
 ```bash

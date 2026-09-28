@@ -19,7 +19,7 @@
 
 - [ ] Load and validate alert rules when the processor starts
 - [ ] Evaluate temperature and humidity thresholds
-- [ ] Create the `alerts` database table
+- [x] Create the `alerts` database table
 - [ ] Insert alerts idempotently with `UNIQUE (event_id, metric)`
 - [ ] Add an API endpoint for recent/active alerts
 - [ ] Add evaluator and API tests
@@ -62,4 +62,3 @@ The MVP is complete when a simulated device can send Protobuf telemetry to the p
 - UI-based rule editing and complex per-device rules
 - Alert acknowledgement and automatic resolution workflows
 - Large-scale load testing and advanced observability
-
