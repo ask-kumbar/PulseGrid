@@ -131,7 +131,10 @@ These tests use in-memory fakes for Kafka, Redis, and TimescaleDB, so Docker doe
 
 ## Documentation
 
-For setup details and every command used during development, see [the command guide](docs/command-guide.md).
+- [MVP timeline through October 1, 2026](docs/mvp-timeline.md)
+- [Command guide](docs/command-guide.md)
+- [Build plan](docs/build-plan.md)
+- [Interview notes](docs/interview-notes.md)
 
 ## Next
 
