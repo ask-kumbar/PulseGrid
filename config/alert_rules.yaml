@@ -1,0 +1,15 @@
+version: 1
+
+# Demonstration thresholds for the PulseGrid MVP.
+# Real deployments must use limits approved for their equipment and environment.
+rules:
+  temperature_c:
+    unit: celsius
+    warning_high: 60.0
+    critical_high: 80.0
+
+  humidity_pct:
+    unit: percent
+    warning_low: 20.0
+    warning_high: 75.0
+    critical_high: 90.0

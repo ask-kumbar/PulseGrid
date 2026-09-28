@@ -117,6 +117,10 @@ Historical state through the query API:
 curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100"
 ```
 
+## Alert configuration
+
+Demo alert thresholds are defined in [`config/alert_rules.yaml`](config/alert_rules.yaml). The processor reads the path from `ALERT_RULES_PATH`, which defaults to that file. These example thresholds are for the portfolio MVP and are not certified equipment safety limits.
+
 ## Run automated tests
 
 ```bash
