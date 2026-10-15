@@ -17,7 +17,7 @@ flowchart LR
   A -->|device_id key| K[(Kafka: telemetry.raw)]
   K --> P[Telemetry processor]
   P --> R[(Redis: latest state)]
-  P --> T[(TimescaleDB: history)]
+  P --> T[(TimescaleDB: history + alerts)]
   R --> Q[Query API]
   T --> Q
   Q --> C[Dashboard / API client]
@@ -30,7 +30,8 @@ flowchart LR
 - Async Kafka producer and consumer processor
 - Redis latest-state storage per tenant and device
 - TimescaleDB telemetry history with idempotent inserts
-- JSON query API for latest state and filtered history
+- Durable threshold alerts with idempotent inserts
+- JSON query API for latest state, filtered history, and active alerts
 - Configurable concurrent simulator for finite load tests or continuous telemetry
 - Automated tests for event construction, ingestion validation, Kafka publishing, and query behavior
 - Device simulator and end-to-end local verification
@@ -81,6 +82,12 @@ Run a short multi-device load test:
 python -m services.device_simulator.main --devices 3 --count 20 --interval 0.5
 ```
 
+Send a deliberate threshold breach to test alert handling:
+
+```bash
+python -m services.device_simulator.main --count 1 --scenario temperature-critical
+```
+
 Run continuously until `Ctrl+C`:
 
 ```bash
@@ -117,6 +124,12 @@ Historical state through the query API:
 curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100"
 ```
 
+Active alerts through the query API:
+
+```bash
+curl "http://127.0.0.1:8001/v1/tenants/acme/alerts?severity=critical&limit=20"
+```
+
 ## Alert configuration
 
 Demo alert thresholds are defined in [`config/alert_rules.yaml`](config/alert_rules.yaml). The processor reads the path from `ALERT_RULES_PATH`, which defaults to that file. These example thresholds are for the portfolio MVP and are not certified equipment safety limits.
@@ -138,7 +151,7 @@ These tests use in-memory fakes for Kafka, Redis, and TimescaleDB, so Docker doe
 
 ## Next
 
-Add an operations dashboard, alert processing, and observability.
+Add an operations dashboard and observability.
 
 ## License
 

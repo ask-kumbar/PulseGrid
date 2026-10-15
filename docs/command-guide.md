@@ -290,6 +290,16 @@ python -m services.device_simulator.main --devices 3 --count 20 --interval 0.5
 
 This runs three device tasks concurrently. Each device sends 20 ordered events, one every half second. Each event contains temperature and humidity metrics.
 
+### Generate a threshold breach
+
+Use a named scenario to create a predictable alert for an end-to-end test:
+
+```bash
+python -m services.device_simulator.main --count 1 --scenario temperature-critical
+```
+
+Available scenarios are `normal`, `temperature-warning`, `temperature-critical`, `humidity-low`, and `humidity-critical`.
+
 ### Run continuous telemetry
 
 ```bash
@@ -377,6 +387,12 @@ Verify its columns, constraints, and indexes:
 docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "\d alerts"
 ```
 
+### Read recent alerts
+
+```bash
+docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "SELECT alert_id, device_id, metric, severity, value, threshold, status, observed_at FROM alerts ORDER BY observed_at DESC LIMIT 10;"
+```
+
 ### Read recent telemetry history
 
 ```bash
@@ -417,6 +433,14 @@ curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&
 ```
 
 Add `&metric=temperature_c` to filter the history to one metric. `hours` accepts `1` through `720`; `limit` accepts `1` through `1000`.
+
+### Read active alerts
+
+```bash
+curl "http://127.0.0.1:8001/v1/tenants/acme/alerts?severity=critical&limit=20" | jq
+```
+
+Alerts are returned newest first. `status` defaults to `active`; it can also be `acknowledged` or `resolved`. Optionally add `&device_id=sensor-204` to filter one device.
 
 ---
 

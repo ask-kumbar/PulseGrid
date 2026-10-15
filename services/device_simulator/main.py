@@ -15,9 +15,21 @@ load_dotenv()
 
 API_URL = os.getenv("INGESTION_API_URL", "http://127.0.0.1:8000/v1/telemetry")
 PROTOBUF_MEDIA_TYPE = "application/x-protobuf"
+SCENARIOS = (
+    "normal",
+    "temperature-warning",
+    "temperature-critical",
+    "humidity-low",
+    "humidity-critical",
+)
 
 
-def build_event(device_id: str, sequence_no: int, device_index: int) -> TelemetryEvent:
+def build_event(
+    device_id: str,
+    sequence_no: int,
+    device_index: int,
+    scenario: str = "normal",
+) -> TelemetryEvent:
     """Build one changing telemetry event for a simulated device."""
     observed_at = Timestamp()
     observed_at.GetCurrentTime()
@@ -39,6 +51,15 @@ def build_event(device_id: str, sequence_no: int, device_index: int) -> Telemetr
     humidity.name = "humidity_pct"
     humidity.value = 40.0 + ((sequence_no - 1) % 15) * 0.5
     humidity.unit = "percent"
+
+    if scenario == "temperature-warning":
+        temperature.value = 65.0
+    elif scenario == "temperature-critical":
+        temperature.value = 85.0
+    elif scenario == "humidity-low":
+        humidity.value = 15.0
+    elif scenario == "humidity-critical":
+        humidity.value = 95.0
 
     return event
 
@@ -72,13 +93,14 @@ async def simulate_device(
     count: int,
     interval: float,
     start_sequence: int,
+    scenario: str,
 ) -> None:
     """Send an ordered stream for one device; count=0 runs continuously."""
     sent = 0
     sequence_no = start_sequence
 
     while count == 0 or sent < count:
-        event = build_event(device_id, sequence_no, device_index)
+        event = build_event(device_id, sequence_no, device_index, scenario)
         await send_event(client, event)
         sent += 1
         sequence_no += 1
@@ -99,6 +121,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--interval", type=float, default=1.0, help="seconds between events")
     parser.add_argument("--start-sequence", type=int, default=1)
+    parser.add_argument(
+        "--scenario",
+        choices=SCENARIOS,
+        default="normal",
+        help="reading profile; use an alert scenario to test threshold handling",
+    )
     args = parser.parse_args()
 
     if args.devices < 1:
@@ -126,6 +154,7 @@ async def main() -> None:
                         count=args.count,
                         interval=args.interval,
                         start_sequence=args.start_sequence,
+                        scenario=args.scenario,
                     )
                     for device_index in range(args.devices)
                 )

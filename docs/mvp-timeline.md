@@ -17,13 +17,13 @@
 
 ## September 28 — Alert pipeline
 
-- [ ] Load and validate alert rules when the processor starts
+- [x] Load and validate alert rules when the processor starts
 - [x] Evaluate temperature and humidity thresholds
 - [x] Create the `alerts` database table
-- [ ] Insert alerts idempotently with `UNIQUE (event_id, metric)`
-- [ ] Add an API endpoint for recent/active alerts
-- [ ] Add evaluator and API tests
-- [ ] Verify a threshold breach end to end
+- [x] Insert alerts idempotently with `UNIQUE (event_id, metric)`
+- [x] Add an API endpoint for recent/active alerts
+- [x] Add evaluator, processor-storage, and API tests
+- [x] Verify a threshold breach end to end
 
 ## September 29 — Web dashboard
 

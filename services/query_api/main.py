@@ -3,7 +3,7 @@
 import json
 import os
 from contextlib import asynccontextmanager
-from typing import Annotated
+from typing import Annotated, Literal
 
 import asyncpg
 from dotenv import load_dotenv
@@ -13,6 +13,8 @@ from redis import asyncio as redis
 load_dotenv()
 
 DATABASE_URL = "postgresql://pulsegrid:change-me-for-local-only@localhost:5432/pulsegrid"
+AlertStatus = Literal["active", "acknowledged", "resolved"]
+AlertSeverity = Literal["warning", "critical"]
 
 
 def latest_state_key(tenant_id: str, device_id: str) -> str:
@@ -125,4 +127,76 @@ async def get_device_history(
         "metric": metric,
         "count": len(readings),
         "readings": readings,
+    }
+
+
+@app.get("/v1/tenants/{tenant_id}/alerts")
+async def get_alerts(
+    tenant_id: str,
+    request: Request,
+    status_filter: Annotated[AlertStatus, Query(alias="status")] = "active",
+    severity: AlertSeverity | None = None,
+    device_id: str | None = None,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> dict[str, object]:
+    """Return dashboard-ready alerts, newest first, for one tenant."""
+    rows = await request.app.state.database_pool.fetch(
+        """
+        SELECT
+          alert_id::text,
+          event_id::text,
+          tenant_id,
+          device_id,
+          metric,
+          unit,
+          value,
+          threshold,
+          condition,
+          severity,
+          message,
+          observed_at,
+          status,
+          created_at
+        FROM alerts
+        WHERE tenant_id = $1
+          AND status = $2
+          AND ($3::text IS NULL OR severity = $3)
+          AND ($4::text IS NULL OR device_id = $4)
+        ORDER BY observed_at DESC
+        LIMIT $5
+        """,
+        tenant_id,
+        status_filter,
+        severity,
+        device_id,
+        limit,
+    )
+
+    alerts = [
+        {
+            "alert_id": row["alert_id"],
+            "event_id": row["event_id"],
+            "tenant_id": row["tenant_id"],
+            "device_id": row["device_id"],
+            "metric": row["metric"],
+            "unit": row["unit"],
+            "value": row["value"],
+            "threshold": row["threshold"],
+            "condition": row["condition"],
+            "severity": row["severity"],
+            "message": row["message"],
+            "observed_at": row["observed_at"].isoformat(),
+            "status": row["status"],
+            "created_at": row["created_at"].isoformat(),
+        }
+        for row in rows
+    ]
+
+    return {
+        "tenant_id": tenant_id,
+        "status": status_filter,
+        "severity": severity,
+        "device_id": device_id,
+        "count": len(alerts),
+        "alerts": alerts,
     }

@@ -100,3 +100,54 @@ async def test_history_rejects_invalid_hours_before_database_call(query_client) 
 
     assert response.status_code == 422
     assert pool.calls == []
+
+
+async def test_alerts_returns_rows_and_passes_filters(query_client) -> None:
+    timestamp = datetime(2026, 10, 5, 10, 30, tzinfo=timezone.utc)
+    pool = FakeDatabasePool(
+        [
+            {
+                "alert_id": "alert-1",
+                "event_id": "event-1",
+                "tenant_id": "acme",
+                "device_id": "sensor-204",
+                "metric": "temperature_c",
+                "unit": "celsius",
+                "value": 85.0,
+                "threshold": 80.0,
+                "condition": "high",
+                "severity": "critical",
+                "message": "temperature_c is high",
+                "observed_at": timestamp,
+                "status": "active",
+                "created_at": timestamp,
+            }
+        ]
+    )
+    app.state.database_pool = pool
+
+    response = await query_client.get(
+        "/v1/tenants/acme/alerts",
+        params={"severity": "critical", "device_id": "sensor-204", "limit": 10},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "active"
+    assert body["count"] == 1
+    assert body["alerts"][0]["alert_id"] == "alert-1"
+    assert body["alerts"][0]["observed_at"] == timestamp.isoformat()
+    assert pool.calls[0][1:] == ("acme", "active", "critical", "sensor-204", 10)
+
+
+async def test_alerts_reject_invalid_status_before_database_call(query_client) -> None:
+    pool = FakeDatabasePool()
+    app.state.database_pool = pool
+
+    response = await query_client.get(
+        "/v1/tenants/acme/alerts",
+        params={"status": "open"},
+    )
+
+    assert response.status_code == 422
+    assert pool.calls == []
