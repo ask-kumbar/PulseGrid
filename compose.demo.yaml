@@ -1,0 +1,175 @@
+# Standalone portfolio demo. Do not combine this with compose.yaml.
+# `docker compose -f compose.demo.yaml up --build -d --wait`
+# Data is isolated from the development stack in this named Compose project.
+name: pulsegrid-demo
+
+x-python-service: &python-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: pulsegrid-python:demo
+  init: true
+  restart: unless-stopped
+  environment: &app-environment
+    KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    REDIS_URL: redis://redis:6379/0
+    DATABASE_URL: postgresql://pulsegrid:${DEMO_POSTGRES_PASSWORD:-pulsegrid-demo-local-only}@timescaledb:5432/pulsegrid
+    ALERT_RULES_PATH: /app/config/alert_rules.yaml
+    TELEMETRY_DLQ_TOPIC: telemetry.dlq
+
+services:
+  kafka:
+    image: apache/kafka:3.9.0
+    hostname: kafka
+    restart: unless-stopped
+    environment:
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      KAFKA_LOG_RETENTION_HOURS: 168
+      KAFKA_HEAP_OPTS: -Xms256m -Xmx512m
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "kafka:9092", "--list"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  kafka-init:
+    image: apache/kafka:3.9.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic telemetry.raw --partitions 3 --replication-factor 1
+        /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic telemetry.dlq --partitions 3 --replication-factor 1
+    restart: "no"
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  timescaledb:
+    image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pulsegrid
+      POSTGRES_USER: pulsegrid
+      POSTGRES_PASSWORD: ${DEMO_POSTGRES_PASSWORD:-pulsegrid-demo-local-only}
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+      - ./infra/timescaledb/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  ingestion-api:
+    <<: *python-service
+    command: ["uvicorn", "services.ingestion_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${DEMO_INGESTION_PORT:-8081}:8000"
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  processor:
+    <<: *python-service
+    command: ["python", "-m", "services.telemetry_processor.main"]
+    stop_grace_period: 30s
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+
+  query-api:
+    <<: *python-service
+    command: ["uvicorn", "services.query_api.main:app", "--host", "0.0.0.0", "--port", "8001"]
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    image: pulsegrid-dashboard:demo
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DEMO_DASHBOARD_PORT:-8080}:80"
+    depends_on:
+      query-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # This one-shot tool runs only when explicitly requested with `compose run`.
+  simulator:
+    <<: *python-service
+    profiles: ["tools"]
+    restart: "no"
+    environment:
+      INGESTION_API_URL: http://ingestion-api:8000/v1/telemetry
+      QUERY_API_URL: http://query-api:8001
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      TELEMETRY_DLQ_TOPIC: telemetry.dlq
+    depends_on:
+      ingestion-api:
+        condition: service_healthy
+      processor:
+        condition: service_started
+      query-api:
+        condition: service_healthy
+    entrypoint: ["python", "-m", "services.device_simulator.main"]
+    command: ["--devices", "3", "--count", "30", "--interval", "1"]
+
+volumes:
+  kafka-data:
+  redis-data:
+  timescale-data:
