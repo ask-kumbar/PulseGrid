@@ -8,10 +8,13 @@ from fastapi import FastAPI, HTTPException, Request, Response, status
 from google.protobuf.message import DecodeError
 
 from generated.telemetry_pb2 import IngestTelemetryResponse, TelemetryEvent
+from services.telemetry_validation import (
+    TelemetryValidationError,
+    validate_telemetry_event,
+)
 
 PROTOBUF_MEDIA_TYPE = "application/x-protobuf"
 TELEMETRY_TOPIC = "telemetry.raw"
-
 load_dotenv()
 
 
@@ -31,6 +34,14 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PulseGrid Ingestion API", lifespan=lifespan)
+
+
+def validate_event(event: TelemetryEvent) -> None:
+    """Reject events that cannot be safely stored before accepting them into Kafka."""
+    try:
+        validate_telemetry_event(event)
+    except TelemetryValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get("/health")
@@ -55,10 +66,7 @@ async def ingest(request: Request) -> Response:
     except DecodeError as error:
         raise HTTPException(status_code=400, detail="Invalid Protobuf payload") from error
 
-    if not event.event_id or not event.device_id or not event.tenant_id:
-        raise HTTPException(status_code=422, detail="event_id, device_id, and tenant_id are required")
-    if event.sequence_no == 0 or not event.metrics:
-        raise HTTPException(status_code=422, detail="sequence_no and at least one metric are required")
+    validate_event(event)
 
     try:
         await request.app.state.kafka_producer.send_and_wait(

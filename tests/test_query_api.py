@@ -32,6 +32,65 @@ async def query_client() -> httpx.AsyncClient:
         yield client
 
 
+async def test_devices_returns_discovered_devices_for_requested_tenant(query_client) -> None:
+    timestamp = datetime(2026, 10, 21, 10, 30, tzinfo=timezone.utc)
+    pool = FakeDatabasePool(
+        [
+            {"device_id": "sensor-205", "last_observed_at": timestamp},
+            {"device_id": "sensor-204", "last_observed_at": timestamp},
+        ]
+    )
+    app.state.database_pool = pool
+
+    response = await query_client.get(
+        "/v1/tenants/acme/devices", params={"limit": 10}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "tenant_id": "acme",
+        "count": 2,
+        "devices": [
+            {"device_id": "sensor-205", "last_observed_at": timestamp.isoformat()},
+            {"device_id": "sensor-204", "last_observed_at": timestamp.isoformat()},
+        ],
+    }
+    query, *params = pool.calls[0]
+    assert params == ["acme", 10]
+    # Tenant filtering must happen before aggregation, not after combining tenants.
+    assert "WHERE tenant_id = $1" in query
+    assert query.index("WHERE tenant_id = $1") < query.index("GROUP BY device_id")
+    assert "ORDER BY last_observed_at DESC, device_id ASC" in query
+    assert "LIMIT $2" in query
+
+
+async def test_devices_is_scoped_to_each_requested_tenant(query_client) -> None:
+    pool = FakeDatabasePool()
+    app.state.database_pool = pool
+
+    for tenant_id in ("acme", "other-tenant"):
+        response = await query_client.get(f"/v1/tenants/{tenant_id}/devices")
+
+        assert response.status_code == 200
+        assert response.json() == {"tenant_id": tenant_id, "count": 0, "devices": []}
+        assert pool.calls[-1][1:] == (tenant_id, 100)
+
+
+@pytest.mark.parametrize("limit", [0, 1001])
+async def test_devices_rejects_unbounded_limits_before_database_call(
+    query_client, limit
+) -> None:
+    pool = FakeDatabasePool()
+    app.state.database_pool = pool
+
+    response = await query_client.get(
+        "/v1/tenants/acme/devices", params={"limit": limit}
+    )
+
+    assert response.status_code == 422
+    assert pool.calls == []
+
+
 async def test_latest_state_returns_redis_json(query_client) -> None:
     state = {
         "event_id": "event-1",

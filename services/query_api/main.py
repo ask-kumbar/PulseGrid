@@ -55,6 +55,35 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/v1/tenants/{tenant_id}/devices")
+async def get_devices(
+    tenant_id: str,
+    request: Request,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> dict[str, object]:
+    """Discover this tenant's devices from persisted telemetry, newest first."""
+    rows = await request.app.state.database_pool.fetch(
+        """
+        SELECT device_id, MAX(observed_at) AS last_observed_at
+        FROM telemetry_events
+        WHERE tenant_id = $1
+        GROUP BY device_id
+        ORDER BY last_observed_at DESC, device_id ASC
+        LIMIT $2
+        """,
+        tenant_id,
+        limit,
+    )
+    devices = [
+        {
+            "device_id": row["device_id"],
+            "last_observed_at": row["last_observed_at"].isoformat(),
+        }
+        for row in rows
+    ]
+    return {"tenant_id": tenant_id, "count": len(devices), "devices": devices}
+
+
 @app.get("/v1/tenants/{tenant_id}/devices/{device_id}/latest")
 async def get_latest_state(tenant_id: str, device_id: str, request: Request) -> dict:
     """Return the newest known telemetry state for one device."""

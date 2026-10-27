@@ -97,3 +97,140 @@ async def test_missing_required_fields_returns_422(api_client) -> None:
 
     assert response.status_code == 422
     assert producer.messages == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "detail"),
+    [
+        ("event_id", "not-a-uuid", "valid UUID"),
+        ("device_id", "   ", "required"),
+        ("tenant_id", "   ", "required"),
+        ("device_id", "sensor\x00invalid", "NUL"),
+        ("tenant_id", "acme\x00invalid", "NUL"),
+        ("sequence_no", 0, "sequence_no"),
+        ("sequence_no", 2**63, "sequence_no"),
+    ],
+)
+async def test_invalid_event_fields_are_rejected_before_publish(
+    api_client, field, value, detail
+) -> None:
+    client, producer = api_client
+    event, _ = build_valid_payload()
+    setattr(event, field, value)
+
+    response = await client.post(
+        "/v1/telemetry",
+        content=event.SerializeToString(),
+        headers={"Content-Type": PROTOBUF_MEDIA_TYPE},
+    )
+
+    assert response.status_code == 422
+    assert detail in response.json()["detail"]
+    assert producer.messages == []
+
+
+@pytest.mark.parametrize("field", ["observed_at", "metrics"])
+async def test_missing_timestamp_or_metrics_is_rejected_before_publish(
+    api_client, field
+) -> None:
+    client, producer = api_client
+    event, _ = build_valid_payload()
+    event.ClearField(field)
+
+    response = await client.post(
+        "/v1/telemetry",
+        content=event.SerializeToString(),
+        headers={"Content-Type": PROTOBUF_MEDIA_TYPE},
+    )
+
+    assert response.status_code == 422
+    assert producer.messages == []
+
+
+@pytest.mark.parametrize(
+    ("seconds", "nanos"),
+    [(253402300800, 0), (-62135596801, 0), (0, -1), (0, 1_000_000_000)],
+)
+async def test_invalid_timestamp_is_rejected_before_publish(
+    api_client, seconds, nanos
+) -> None:
+    client, producer = api_client
+    event, _ = build_valid_payload()
+    event.observed_at.seconds = seconds
+    event.observed_at.nanos = nanos
+
+    response = await client.post(
+        "/v1/telemetry",
+        content=event.SerializeToString(),
+        headers={"Content-Type": PROTOBUF_MEDIA_TYPE},
+    )
+
+    assert response.status_code == 422
+    assert "valid timestamp" in response.json()["detail"]
+    assert producer.messages == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "detail"),
+    [
+        ("name", "", "nonempty name"),
+        ("name", "   ", "nonempty name"),
+        ("name", "temperature\x00invalid", "NUL"),
+        ("unit", "celsius\x00invalid", "NUL"),
+        ("value", float("nan"), "finite"),
+        ("value", float("inf"), "finite"),
+        ("value", float("-inf"), "finite"),
+    ],
+)
+async def test_invalid_metric_fields_are_rejected_before_publish(
+    api_client, field, value, detail
+) -> None:
+    client, producer = api_client
+    event, _ = build_valid_payload()
+    setattr(event.metrics[0], field, value)
+
+    response = await client.post(
+        "/v1/telemetry",
+        content=event.SerializeToString(),
+        headers={"Content-Type": PROTOBUF_MEDIA_TYPE},
+    )
+
+    assert response.status_code == 422
+    assert detail in response.json()["detail"]
+    assert producer.messages == []
+
+
+async def test_duplicate_metric_names_are_rejected_before_publish(api_client) -> None:
+    client, producer = api_client
+    event, _ = build_valid_payload()
+    event.metrics.add(name="temperature_c", value=85.0, unit="celsius")
+
+    response = await client.post(
+        "/v1/telemetry",
+        content=event.SerializeToString(),
+        headers={"Content-Type": PROTOBUF_MEDIA_TYPE},
+    )
+
+    assert response.status_code == 422
+    assert "unique" in response.json()["detail"]
+    assert producer.messages == []
+
+
+async def test_valid_epoch_and_maximum_sequence_keep_original_protobuf_bytes(api_client) -> None:
+    client, producer = api_client
+    event, _ = build_valid_payload()
+    event.observed_at.seconds = 0
+    event.observed_at.nanos = 0
+    event.sequence_no = 2**63 - 1
+    event.metrics.add(name="humidity_pct", value=0.0, unit="percent")
+    payload = event.SerializeToString()
+
+    response = await client.post(
+        "/v1/telemetry",
+        content=payload,
+        headers={"Content-Type": PROTOBUF_MEDIA_TYPE},
+    )
+
+    assert response.status_code == 202
+    assert response.headers["content-type"] == PROTOBUF_MEDIA_TYPE
+    assert producer.messages == [(TELEMETRY_TOPIC, payload, b"sensor-204")]

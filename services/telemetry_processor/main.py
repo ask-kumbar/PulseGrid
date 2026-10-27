@@ -1,16 +1,19 @@
 import asyncio
+import base64
 import json
 import os
 from datetime import timezone
+from typing import Any
 from uuid import uuid4
 
 import asyncpg
-from aiokafka import AIOKafkaConsumer
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer
 from dotenv import load_dotenv
 from google.protobuf.message import DecodeError
 from redis import asyncio as redis
 
 from generated.telemetry_pb2 import TelemetryEvent
+from services.telemetry_validation import TelemetryValidationError, validate_telemetry_event
 from services.telemetry_processor.alert_rules import (
     AlertDecision,
     AlertRulesFile,
@@ -21,9 +24,52 @@ from services.telemetry_processor.alert_rules import (
 load_dotenv()
 
 TELEMETRY_TOPIC = "telemetry.raw"
+DEAD_LETTER_TOPIC = os.getenv("TELEMETRY_DLQ_TOPIC", "telemetry.dlq")
 CONSUMER_GROUP = "telemetry-processor"
 DATABASE_URL = "postgresql://pulsegrid:change-me-for-local-only@localhost:5432/pulsegrid"
 DEFAULT_ALERT_RULES_PATH = "config/alert_rules.yaml"
+
+
+def dead_letter_envelope(record: Any, reason: str) -> bytes:
+    """Encode an invalid Kafka record for the telemetry DLQ.
+
+    The JSON envelope preserves the source location and raw payload so an
+    operator can inspect or replay the record later.  Binary Kafka values and
+    keys are represented as base64 strings; a null Kafka value remains null.
+    """
+    raw_value = getattr(record, "value", None)
+    raw_key = getattr(record, "key", None)
+    source: dict[str, Any] = {
+        "topic": getattr(record, "topic", TELEMETRY_TOPIC),
+        "partition": getattr(record, "partition", None),
+        "offset": getattr(record, "offset", None),
+        "timestamp_ms": getattr(record, "timestamp", None),
+        "key_base64": (
+            base64.b64encode(raw_key).decode("ascii") if raw_key is not None else None
+        ),
+    }
+    envelope = {
+        "schema_version": 1,
+        "reason": reason,
+        "source": source,
+        "raw_payload_base64": (
+            base64.b64encode(raw_value).decode("ascii") if raw_value is not None else None
+        ),
+    }
+    return json.dumps(envelope, separators=(",", ":"), sort_keys=True).encode("utf-8")
+
+
+async def send_to_dead_letter(
+    producer: AIOKafkaProducer,
+    record: Any,
+    reason: str,
+) -> None:
+    """Publish an invalid record before allowing the source offset to commit."""
+    await producer.send_and_wait(
+        DEAD_LETTER_TOPIC,
+        dead_letter_envelope(record, reason),
+        key=getattr(record, "key", None),
+    )
 
 
 def latest_state_key(event: TelemetryEvent) -> str:
@@ -141,23 +187,52 @@ async def main() -> None:
         bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
         group_id=CONSUMER_GROUP,
         enable_auto_commit=False,
-        auto_offset_reset="latest",
+        # A new group must process events accepted before the processor started.
+        # Existing groups resume from their committed offsets as usual.
+        auto_offset_reset="earliest",
+    )
+    dead_letter_producer = AIOKafkaProducer(
+        bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
+        acks="all",
     )
 
     database: asyncpg.Connection | None = None
+    dead_letter_producer_started = False
     try:
         await redis_client.ping()
         database = await asyncpg.connect(os.getenv("DATABASE_URL", DATABASE_URL))
+        await dead_letter_producer.start()
+        dead_letter_producer_started = True
         await consumer.start()
-        print(f"Processor started: group={CONSUMER_GROUP}, topic={TELEMETRY_TOPIC}")
+        print(
+            f"Processor started: group={CONSUMER_GROUP}, topic={TELEMETRY_TOPIC}, "
+            f"dlq={DEAD_LETTER_TOPIC}"
+        )
         print(f"Loaded alert rules: path={alert_rules_path}, metrics={len(alert_rules.rules)}")
 
         async for record in consumer:
             event = TelemetryEvent()
             try:
                 event.ParseFromString(record.value)
-            except DecodeError:
-                print(f"Skipping invalid Protobuf at partition={record.partition}, offset={record.offset}")
+            except (DecodeError, TypeError) as error:
+                reason = f"protobuf_decode_error: {error}"
+                await send_to_dead_letter(dead_letter_producer, record, reason)
+                print(
+                    f"Dead-lettered invalid Protobuf at partition={record.partition}, "
+                    f"offset={record.offset}"
+                )
+                await consumer.commit()
+                continue
+
+            try:
+                validate_telemetry_event(event)
+            except TelemetryValidationError as error:
+                reason = f"semantic_validation_error: {error}"
+                await send_to_dead_letter(dead_letter_producer, record, reason)
+                print(
+                    f"Dead-lettered invalid telemetry at partition={record.partition}, "
+                    f"offset={record.offset}: {error}"
+                )
                 await consumer.commit()
                 continue
 
@@ -176,10 +251,16 @@ async def main() -> None:
             await consumer.commit()
     finally:
         await consumer.stop()
+        if dead_letter_producer_started:
+            await dead_letter_producer.stop()
         if database is not None:
             await database.close()
         await redis_client.aclose()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # asyncio.run cancels main first, so its finally block closes all clients.
+        print("Processor stopped.")
