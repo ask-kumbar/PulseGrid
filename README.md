@@ -1,68 +1,110 @@
-# PulseGrid
+# PulseGrid — Fleet Signal Monitor
 
-A distributed, real-time IoT telemetry pipeline built with FastAPI, Protobuf, Kafka, Redis, and TimescaleDB.
+A working portfolio project for ingesting device signals, keeping their history, and surfacing threshold alerts. Simulated devices send binary Protobuf messages through FastAPI and Kafka; a React dashboard reads the resulting state from Redis and TimescaleDB through a separate Query API.
 
-## What it does
-
-PulseGrid receives telemetry from simulated IoT devices, processes it asynchronously, and stores it in two forms:
-
-- **Redis** holds the latest state for fast device lookups.
-- **TimescaleDB** retains every metric for historical queries and charts.
+The demo uses temperature and humidity signals. The same ingestion and processing pattern can support other equipment metrics when their contracts and alert rules are defined.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  D[Device simulator] -->|Protobuf over HTTP| A[Ingestion API]
+  D[Concurrent device simulator] -->|Protobuf over HTTP| A[Ingestion API]
   A -->|device_id key| K[(Kafka: telemetry.raw)]
   K --> P[Telemetry processor]
-  P --> R[(Redis: latest state)]
   P --> T[(TimescaleDB: history + alerts)]
-  R --> Q[Query API]
-  T --> Q
-  Q --> C[Dashboard / API client]
+  P --> R[(Redis: latest state)]
+  P -->|invalid record| L[(Kafka: telemetry.dlq)]
+  T --> Q[Query API]
+  R --> Q
+  Q -->|JSON / 5-second polling| C[React dashboard]
 ```
 
-## Implemented
+## What you can demonstrate
 
-- Protobuf telemetry contract and binary HTTP ingestion endpoint
-- Kafka topic with three partitions, keyed by `device_id`
-- Async Kafka producer and consumer processor
-- Redis latest-state storage per tenant and device
-- TimescaleDB telemetry history with idempotent inserts
-- Durable threshold alerts with idempotent inserts
-- JSON query API for latest state, filtered history, and active alerts
-- Configurable concurrent simulator for finite load tests or continuous telemetry
-- Automated tests for event construction, ingestion validation, Kafka publishing, and query behavior
-- Device simulator and end-to-end local verification
+- Send continuous telemetry from several simulated devices concurrently.
+- Switch devices in the dashboard and view latest readings and recent history.
+- Trigger warning or critical threshold breaches and inspect persisted alerts.
+- Inspect an invalid Kafka record's dead-letter envelope; its source offset advances only after the DLQ publish is acknowledged.
+- Follow an event from its Protobuf contract through Kafka to both read stores.
+- Explain partition ordering, manual offset commits, and duplicate-safe database writes.
 
-## Run locally
+The stack includes Python, FastAPI, Protobuf, Kafka, Redis, TimescaleDB/PostgreSQL, React, TypeScript, Recharts, Vite, and Docker Compose. It is a local portfolio MVP; a public hosted instance is not yet available.
 
-Requirements: Docker Desktop and Python 3.12+.
+## Run the full Docker demo
+
+Install and start Docker Desktop, then run from the repository root:
 
 ```bash
 git clone https://github.com/ask-kumbar/PulseGrid.git
 cd PulseGrid
+docker compose -f compose.demo.yaml up --build -d --wait
+```
 
+Open [the dashboard](http://localhost:8080). A new demo has no readings until you send events:
+
+```bash
+docker compose -f compose.demo.yaml run --rm simulator --devices 3 --count 30 --interval 1
+```
+
+Switch between `sensor-204`, `sensor-205`, and `sensor-206` in the dashboard. Send a deliberate critical-temperature event:
+
+```bash
+docker compose -f compose.demo.yaml run --rm simulator --devices 1 --count 1 --scenario temperature-critical
+```
+
+The dashboard polls every five seconds, so allow a refresh cycle for the reading and alert to appear. Use `--count 0` for continuous simulation and stop it with `Ctrl+C`.
+
+Run the real-stack smoke check to send isolated test traffic and verify ingestion, validation, processing, replay-safe storage, and tenant-scoped reads:
+
+```bash
+docker compose -f compose.demo.yaml run --rm --entrypoint python simulator -m scripts.smoke_demo
+```
+
+The smoke check creates a unique test tenant and leaves its small set of records in the demo database. It is a behavior check, not a throughput benchmark.
+
+Check services or stop the demo while retaining its named data volumes:
+
+```bash
+docker compose -f compose.demo.yaml ps
+docker compose -f compose.demo.yaml down
+```
+
+`compose.demo.yaml` is standalone and uses a separate Compose project from the development stack. Do not combine the two Compose files. The demo exposes the dashboard on port `8080` and ingestion on port `8081` on loopback; database, Redis, Kafka, and Query API connections remain inside its Docker network. Keep this unauthenticated demo local until access controls and HTTPS are configured for hosting.
+
+Optional settings are in `.env.demo.example`. To customize them, copy it to `.env.demo`, edit the values, and use it in every demo command:
+
+```bash
+docker compose --env-file .env.demo -f compose.demo.yaml up --build -d --wait
+```
+
+Keep `.env.demo` out of Git. The default credentials are for this local demonstration only.
+
+## Develop locally
+
+Use this workflow when you want to edit and understand each service individually. Requirements: Docker Desktop, Python 3.12+, and a Node.js version supported by the dashboard's Vite dependency.
+
+```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
-pip install --upgrade -e ".[dev]"
-
+python -m pip install -e ".[dev]"
 docker compose up -d kafka redis timescaledb
 ```
 
-Create the Kafka topic once:
+Create the development topics once:
 
 ```bash
 docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 \
   --create --if-not-exists \
-  --topic telemetry.raw \
-  --partitions 3 \
-  --replication-factor 1
+  --topic telemetry.raw --partitions 3 --replication-factor 1
+
+docker compose exec kafka /opt/kafka/bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --create --if-not-exists \
+  --topic telemetry.dlq --partitions 3 --replication-factor 1
 ```
 
-Start these in separate terminals:
+In three separate terminals, activate `.venv` from the repository root and run one command per terminal:
 
 ```bash
 uvicorn services.ingestion_api.main:app --reload
@@ -73,86 +115,72 @@ python -m services.telemetry_processor.main
 ```
 
 ```bash
-python -m services.device_simulator.main
-```
-
-Run a short multi-device load test:
-
-```bash
-python -m services.device_simulator.main --devices 3 --count 20 --interval 0.5
-```
-
-Send a deliberate threshold breach to test alert handling:
-
-```bash
-python -m services.device_simulator.main --count 1 --scenario temperature-critical
-```
-
-Run continuously until `Ctrl+C`:
-
-```bash
-python -m services.device_simulator.main --devices 3 --count 0 --interval 1
-```
-
-```bash
 uvicorn services.query_api.main:app --reload --port 8001
 ```
 
-## Verify stored telemetry
-
-Latest device state in Redis:
+In a fourth terminal, start the dashboard:
 
 ```bash
-docker compose exec redis redis-cli --raw GET telemetry:latest:acme:sensor-204 | jq
+cd dashboard
+npm ci
+npm run dev
 ```
 
-Historical telemetry in TimescaleDB:
+Open [localhost:5173](http://localhost:5173). In a fifth terminal, from the repository root with `.venv` active, send sample traffic:
 
 ```bash
-docker compose exec timescaledb psql -U pulsegrid -d pulsegrid -c "SELECT event_id, device_id, metric, value, observed_at FROM telemetry_events ORDER BY observed_at DESC;"
+python -m services.device_simulator.main --devices 3 --count 30 --interval 1
 ```
 
-Latest state through the query API:
+Vite forwards `/api` requests to the Query API on port `8001`. The development ingestion API uses port `8000`. See the [command guide](docs/command-guide.md) for environment setup, Protobuf regeneration, existing database migrations, and inspection commands.
 
-```bash
-curl http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/latest
-```
+## API surface
 
-Historical state through the query API:
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /v1/telemetry` | Validate Protobuf telemetry and publish it to Kafka; return a Protobuf acknowledgement |
+| `GET /v1/tenants/{tenant_id}/devices` | Discover devices from their stored history |
+| `GET /v1/tenants/{tenant_id}/devices/{device_id}/latest` | Read the last processed state from Redis |
+| `GET /v1/tenants/{tenant_id}/devices/{device_id}/history` | Read history, with `hours`, `metric`, and `limit` filters |
+| `GET /v1/tenants/{tenant_id}/alerts` | Read alerts, with `status`, `severity`, `device_id`, and `limit` filters |
+| `GET /health` | Liveness endpoint on each API service |
 
-```bash
-curl "http://127.0.0.1:8001/v1/tenants/acme/devices/sensor-204/history?hours=24&limit=100"
-```
+## Processing guarantees and limits
 
-Active alerts through the query API:
+The ingestion API validates each Protobuf message, then returns `202` after Kafka acknowledges the event. This does not mean the processor has already stored it. The processor revalidates decoded Kafka events, writes history/alerts and Redis state, then commits its Kafka offset. A failure before the commit can cause an event to be processed again.
 
-```bash
-curl "http://127.0.0.1:8001/v1/tenants/acme/alerts?severity=critical&limit=20"
-```
+History rows use `(event_id, metric, observed_at)` as their unique key, and alerts use `(event_id, metric)`. Replaying the same event therefore does not add duplicate rows. This is at-least-once processing with idempotent database inserts, not an exactly-once transaction across Kafka, Redis, and PostgreSQL.
 
-## Alert configuration
+If a Kafka record cannot be decoded or fails semantic validation, the processor publishes a JSON envelope to `telemetry.dlq` before committing the source offset. The envelope preserves source metadata and Base64-encoded key/payload bytes for inspection. Kafka keys events by `device_id`, preserving their append order within a partition. The demo uses one broker, three partitions per telemetry topic, and replication factor one. Redis holds the last processed event per tenant/device; it does not currently reject late events based on their observation timestamp. Alerts are recorded as active; acknowledgement and automatic resolution are future work.
 
-Demo alert thresholds are defined in [`config/alert_rules.yaml`](config/alert_rules.yaml). The processor reads the path from `ALERT_RULES_PATH`, which defaults to that file. These example thresholds are for the portfolio MVP and are not certified equipment safety limits.
+Thresholds live in [config/alert_rules.yaml](config/alert_rules.yaml). These are demonstration values, not validated equipment safety limits. The dead-letter queue does not yet provide automated review or replay tooling. Authentication, authorization, high availability, and measured large-scale performance also remain outside this MVP.
 
-## Run automated tests
+## Verification
+
+Run the Python tests from the repository root:
 
 ```bash
 python -m pytest -q
 ```
 
-These tests use in-memory fakes for Kafka, Redis, and TimescaleDB, so Docker does not need to be running.
+These tests use fakes for Kafka, Redis, and TimescaleDB. They verify application behavior without Docker; they do not replace testing the real Docker pipeline.
 
-## Documentation
+Check and build the dashboard from `dashboard/`:
 
-- [MVP timeline through October 1, 2026](docs/mvp-timeline.md)
+```bash
+npm run lint
+npm run build
+```
+
+## Project notes
+
+- [Current MVP checklist](docs/mvp-timeline.md)
+- [Architecture decisions and remaining work](docs/build-plan.md)
 - [Command guide](docs/command-guide.md)
-- [Build plan](docs/build-plan.md)
+- [Dashboard development](dashboard/README.md)
+- [Portfolio, demo outline, and resume wording](docs/portfolio.md)
 - [Interview notes](docs/interview-notes.md)
-
-## Next
-
-Add an operations dashboard and observability.
 
 ## License
 
-MIT
+[MIT](LICENSE), as recorded in this repository's license file.
