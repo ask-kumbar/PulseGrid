@@ -1,4 +1,4 @@
-# Standalone portfolio demo. Do not combine this with compose.yaml.
+# Standalone local demo. Do not combine this with compose.yaml.
 # `docker compose -f compose.demo.yaml up --build -d --wait`
 # Data is isolated from the development stack in this named Compose project.
 name: pulsegrid-demo

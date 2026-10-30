@@ -9,7 +9,7 @@ Simulator → Ingestion API → Kafka: telemetry.raw → Processor → Redis + T
 
 ## Choose a workflow
 
-- **Full Docker demo**: the quickest way to demonstrate the complete application. Docker runs the APIs, processor, stores, and built dashboard together.
+- **Full Docker demo**: the quickest way to run the complete application. Docker runs the APIs, processor, stores, and built dashboard together.
 - **Development stack**: run the infrastructure in Docker and the Python/React services on your machine while you edit and learn the code.
 
 Do not combine `compose.demo.yaml` with the development `compose.yaml`; they are intentionally separate environments.

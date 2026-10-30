@@ -11,3 +11,8 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# Personal application-preparation notes (kept local only).
+docs/portfolio.md
+docs/interview-notes.md
+docs/mvp-timeline.md

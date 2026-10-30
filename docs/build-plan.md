@@ -50,6 +50,6 @@ Chart values use observation timestamps and retain subsecond detail for tooltips
 - `/health` is an API liveness check, not an end-to-end pipeline readiness or lag measurement.
 - No throughput, p95 latency, large-fleet capacity, or uptime targets have been measured.
 
-## Release order
+## Operational next steps
 
-Finish and verify the reproducible local Docker demo, including its isolated `scripts.smoke_demo` check, then record a short demonstration and prepare the repository for review. Next select hosting, add access controls and HTTPS, deploy, and repeat the end-to-end checks. Use the [MVP checklist](mvp-timeline.md) for release progress and the [portfolio guide](portfolio.md) for an honest demonstration and resume description.
+Keep the reproducible local Docker demo and its isolated `scripts.smoke_demo` check passing. Before public deployment, select hosting, add access controls and HTTPS, deploy, and repeat the end-to-end checks in that environment.

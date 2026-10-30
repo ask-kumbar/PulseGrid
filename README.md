@@ -1,6 +1,6 @@
 # PulseGrid — Fleet Signal Monitor
 
-A working portfolio project for ingesting device signals, keeping their history, and surfacing threshold alerts. Simulated devices send binary Protobuf messages through FastAPI and Kafka; a React dashboard reads the resulting state from Redis and TimescaleDB through a separate Query API.
+A local device-signal monitoring system for ingesting device signals, keeping their history, and surfacing threshold alerts. Simulated devices send binary Protobuf messages through FastAPI and Kafka; a React dashboard reads the resulting state from Redis and TimescaleDB through a separate Query API.
 
 The demo uses temperature and humidity signals. The same ingestion and processing pattern can support other equipment metrics when their contracts and alert rules are defined.
 
@@ -19,7 +19,7 @@ flowchart LR
   Q -->|JSON / 5-second polling| C[React dashboard]
 ```
 
-## What you can demonstrate
+## Capabilities
 
 - Send continuous telemetry from several simulated devices concurrently.
 - Switch devices in the dashboard and view latest readings and recent history.
@@ -28,7 +28,7 @@ flowchart LR
 - Follow an event from its Protobuf contract through Kafka to both read stores.
 - Explain partition ordering, manual offset commits, and duplicate-safe database writes.
 
-The stack includes Python, FastAPI, Protobuf, Kafka, Redis, TimescaleDB/PostgreSQL, React, TypeScript, Recharts, Vite, and Docker Compose. It is a local portfolio MVP; a public hosted instance is not yet available.
+The stack includes Python, FastAPI, Protobuf, Kafka, Redis, TimescaleDB/PostgreSQL, React, TypeScript, Recharts, Vite, and Docker Compose. It is a local MVP; a public hosted instance is not yet available.
 
 ## Run the full Docker demo
 
@@ -174,12 +174,9 @@ npm run build
 
 ## Project notes
 
-- [Current MVP checklist](docs/mvp-timeline.md)
 - [Architecture decisions and remaining work](docs/build-plan.md)
 - [Command guide](docs/command-guide.md)
 - [Dashboard development](dashboard/README.md)
-- [Portfolio, demo outline, and resume wording](docs/portfolio.md)
-- [Interview notes](docs/interview-notes.md)
 
 ## License
 
